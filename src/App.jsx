@@ -144,13 +144,12 @@ export default function App() {
         .dp-input,.dp-select{background:var(--dp-input);color:var(--dp-text);border:1px solid var(--dp-border);border-radius:8px;padding:9px 10px;min-width:0;max-width:100%;font:inherit}
         .dp-input:focus-visible,.dp-select:focus-visible,.dp-button:focus-visible,.dp-ghost:focus-visible{outline:2px solid var(--dp-accent);outline-offset:2px}
         .dp-input[type=number]{font-variant-numeric:tabular-nums}.dp-root input[type=range],.dp-root input[type=checkbox]{accent-color:var(--dp-accent)}
-        .dp-layout-tabs{display:flex;gap:7px;margin-bottom:16px}.dp-layout-tabs button{flex:0 0 auto}.dp-layout-tabs .selected{background:var(--dp-accent);color:var(--dp-on-accent);border-color:var(--dp-accent)}
         .dp-morning{display:grid;grid-template-columns:1fr;gap:15px;margin-bottom:15px}.dp-compact .dp-morning{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
         .dp-pizza-row{display:grid;grid-template-columns:minmax(0,1fr) 80px;gap:10px;align-items:center;margin-bottom:8px}.dp-pizza-row .dp-input{width:100%;text-align:center}
         .dp-compact .dp-pizza-row{grid-template-columns:minmax(0,1fr) 58px;gap:5px}.dp-compact .dp-pizza-row .dp-input{padding:7px 3px}.dp-compact .dp-panel{padding:12px}.dp-compact .dp-panel-title{font-size:1em}
         .dp-ingredient{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--dp-border);font-size:.88em}.dp-ingredient:last-child{border-bottom:0}.dp-ingredient strong{color:var(--dp-accent);white-space:nowrap;font-variant-numeric:tabular-nums}
         .dp-compact .dp-morning .dp-ingredient{font-size:.76em}.dp-pizza-total{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}.dp-pizza-total strong{color:var(--dp-accent);font-size:1.15em}
-        .dp-compact .dp-pizza-total .dp-button{width:100%}.dp-scale-row{display:flex;gap:8px;margin-bottom:12px}.dp-scale-row .dp-input{flex:1;width:0}.dp-compact .dp-scale-row{flex-wrap:wrap}.dp-compact .dp-scale-row .dp-button{width:100%}
+        .dp-compact .dp-button,.dp-compact .dp-ghost{padding-top:5px;padding-bottom:5px;min-height:32px;line-height:1.2}.dp-compact .dp-pizza-total .dp-button{width:100%}.dp-scale-row{display:flex;gap:8px;margin-bottom:12px}.dp-scale-row .dp-input{flex:1;width:0}.dp-compact .dp-scale-row{flex-wrap:wrap}.dp-compact .dp-scale-row .dp-button{width:100%}
         .dp-divider-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}.dp-batch{background:var(--dp-input);border:1px solid var(--dp-border);border-radius:11px;padding:13px;margin-top:10px}
         .dp-batch-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dp-batch-label{display:flex;align-items:center;gap:10px;font-weight:700}.dp-batch-label input{width:19px;height:19px}
         .dp-batch-controls{display:flex;align-items:center;gap:8px}.dp-batch-controls .dp-input{width:100px;text-align:center}.dp-batch-details{background:var(--dp-card);padding:12px;border-radius:9px;margin-top:12px}.dp-batch-details .dp-ingredient{font-size:.85em}
@@ -179,7 +178,6 @@ export default function App() {
           <button className="dp-ghost" onClick={() => setSettings((old) => ({ ...DEFAULT_SETTINGS, keepAwake: false }))}>Reset appearance</button>
         </section>}
 
-        <div className="dp-layout-tabs" role="group" aria-label="Layout"><button className={`dp-ghost ${settings.layout === "classic" ? "selected" : ""}`} onClick={() => updateSettings({ layout: "classic" })}>Classic</button><button className={`dp-ghost ${settings.layout === "compact" ? "selected" : ""}`} onClick={() => updateSettings({ layout: "compact" })}>Compact</button></div>
         <main className={settings.layout === "compact" ? "dp-compact" : "dp-classic"}>
           {morningCollapsed ? <div className="dp-panel dp-collapsed"><div><strong>Morning setup</strong><div className="dp-small dp-muted">{scaledTotalKg.toFixed(2)} kg scaled recipe</div></div><button className="dp-ghost" onClick={() => setMorningCollapsed(false)}>Expand ▾</button></div> : <>
             <div className="dp-morning">
