@@ -1,5 +1,4 @@
-// src/App.jsx
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 const BASE_RECIPE = [
   { name: "Vesi", amountKg: 13.8 },
@@ -11,7 +10,6 @@ const BASE_RECIPE = [
   { name: "Suola", amountKg: 0.35 },
   { name: "Sokeri", amountKg: 2.3 },
 ];
-
 const PIZZA_SIZES = [
   { name: "XS", weightG: 100 },
   { name: "S", weightG: 220 },
@@ -20,223 +18,183 @@ const PIZZA_SIZES = [
   { name: "Thin Crispy", weightG: 200 },
   { name: "Deep Dish", weightG: 250 },
 ];
-
+const THEMES = {
+  Coffee: { bg: "#241d19", card: "#362a23", input: "#2b221d", border: "#58463a", text: "#f6eadc", muted: "#bba899", accent: "#e4b477", onAccent: "#241d19" },
+  Pine: { bg: "#14241d", card: "#24382c", input: "#1a2b22", border: "#3c5846", text: "#f0f4e8", muted: "#b2c5b3", accent: "#b1d19b", onAccent: "#14241d" },
+  Midnight: { bg: "#141c2f", card: "#232e46", input: "#19243a", border: "#3c4b66", text: "#edf3ff", muted: "#b1c0d9", accent: "#a0c3fa", onAccent: "#141c2f" },
+  Honey: { bg: "#292015", card: "#3c2d1d", input: "#302416", border: "#59432b", text: "#fff2d6", muted: "#d5b98b", accent: "#f0bd61", onAccent: "#292015" },
+  Olive: { bg: "#272b1f", card: "#373e2c", input: "#2b3223", border: "#505b3c", text: "#f2f0df", muted: "#c1c8a3", accent: "#c6ce83", onAccent: "#272b1f" },
+  Terracotta: { bg: "#30201e", card: "#472d29", input: "#382522", border: "#654039", text: "#f9eae1", muted: "#d3aca1", accent: "#e6a080", onAccent: "#30201e" },
+  Slate: { bg: "#20282b", card: "#2e393d", input: "#253034", border: "#465359", text: "#f0f4f2", muted: "#b0bec1", accent: "#a1c6c3", onAccent: "#20282b" },
+  Lavender: { bg: "#272335", card: "#383247", input: "#2e293b", border: "#524b64", text: "#f5f0fa", muted: "#c4b6d3", accent: "#c9afe9", onAccent: "#272335" },
+  Cream: { bg: "#f5f0e6", card: "#fffdf8", input: "#f5f0e6", border: "#ded6c8", text: "#342c25", muted: "#776b5e", accent: "#ae764d", onAccent: "#ffffff" },
+  Sage: { bg: "#e8ede5", card: "#f9fbf7", input: "#edf3e9", border: "#cdd9ca", text: "#273a2f", muted: "#657a6c", accent: "#62896e", onAccent: "#ffffff" },
+};
+const DEFAULT_SETTINGS = { layout: "classic", theme: "Coffee", font: "modern", fontSize: 100, textColor: "default", remember: true, keepAwake: false };
+const FONT_FAMILIES = { modern: 'system-ui, -apple-system, sans-serif', rounded: '"Trebuchet MS", system-ui, sans-serif', serif: 'Georgia, "Times New Roman", serif', mono: 'Consolas, "Courier New", monospace' };
+const BASE_TOTAL = BASE_RECIPE.reduce((sum, ingredient) => sum + ingredient.amountKg, 0);
 const formatUnit = (kg) => (kg < 1 ? `${Math.round(kg * 1000)} g` : `${kg.toFixed(2)} kg`);
+const kgToGrams = (kg) => Math.max(0, Math.round(kg * 1000));
+const gramsToKg = (g) => (g / 1000).toFixed(2);
+const readSettings = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("doughplanner-appearance") || "null");
+    return saved && saved.remember !== false ? { ...DEFAULT_SETTINGS, ...saved, keepAwake: false } : DEFAULT_SETTINGS;
+  } catch { return DEFAULT_SETTINGS; }
+};
 
 export default function App() {
+  const [settings, setSettings] = useState(readSettings);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [awakeActive, setAwakeActive] = useState(false);
+  const [awakeMessage, setAwakeMessage] = useState("");
+  const [morningCollapsed, setMorningCollapsed] = useState(false);
   const [desiredKg, setDesiredKg] = useState("");
   const [scaled, setScaled] = useState(BASE_RECIPE);
-  const [pizzaCounts, setPizzaCounts] = useState(Object.fromEntries(PIZZA_SIZES.map(p => [p.name, ""])));
+  const [pizzaCounts, setPizzaCounts] = useState(Object.fromEntries(PIZZA_SIZES.map((p) => [p.name, ""])));
   const [batches, setBatches] = useState([""]);
   const [expanded, setExpanded] = useState({});
   const [done, setDone] = useState({});
 
-  const baseTotal = BASE_RECIPE.reduce((a, b) => a + b.amountKg, 0);
+  const updateSettings = (patch) => setSettings((old) => ({ ...old, ...patch }));
+  useEffect(() => {
+    try {
+      if (settings.remember) localStorage.setItem("doughplanner-appearance", JSON.stringify({ ...settings, keepAwake: false }));
+      else localStorage.removeItem("doughplanner-appearance");
+    } catch { /* Storage may be unavailable in private browsing. */ }
+  }, [settings]);
 
-  const scaleRecipe = (kg) => {
-    const total = parseFloat(kg);
-    if (!total || total <= 0) return;
-    const factor = total / baseTotal;
-    setScaled(BASE_RECIPE.map(i => ({ ...i, amountKg: i.amountKg * factor })));
+  useEffect(() => {
+    if (!settings.keepAwake) { setAwakeActive(false); setAwakeMessage(""); return; }
+    let lock = null;
+    let disposed = false;
+    const acquire = async () => {
+      if (!("wakeLock" in navigator)) { setAwakeMessage("Screen wake lock is not supported by this browser."); return; }
+      if (document.visibilityState !== "visible") return;
+      try {
+        lock = await navigator.wakeLock.request("screen");
+        if (disposed) { await lock.release(); return; }
+        setAwakeActive(true);
+        setAwakeMessage("");
+        lock.addEventListener("release", () => { if (!disposed) setAwakeActive(false); });
+      } catch { if (!disposed) { setAwakeActive(false); setAwakeMessage("Screen wake lock could not be activated on this device."); } }
+    };
+    const visibilityChanged = () => { if (document.visibilityState === "visible") acquire(); };
+    acquire();
+    document.addEventListener("visibilitychange", visibilityChanged);
+    return () => { disposed = true; document.removeEventListener("visibilitychange", visibilityChanged); if (lock) lock.release().catch(() => {}); };
+  }, [settings.keepAwake]);
 
-    if (batches.length > 0) {
-      const even = total / batches.length;
-      setBatches(Array(batches.length).fill(even.toFixed(2)));
-    }
+  const theme = THEMES[settings.theme] || THEMES.Coffee;
+  const text = settings.textColor === "warm" ? "#f5e8d6" : settings.textColor === "bright" ? "#ffffff" : settings.textColor === "soft" ? "#bfc6c4" : theme.text;
+  const cssVars = { "--dp-bg": theme.bg, "--dp-card": theme.card, "--dp-input": theme.input, "--dp-border": theme.border, "--dp-text": text, "--dp-muted": theme.muted, "--dp-accent": theme.accent, "--dp-on-accent": theme.onAccent, "--dp-font": FONT_FAMILIES[settings.font] || FONT_FAMILIES.modern, "--dp-size": `${settings.fontSize}%` };
+  const pizzaTotalKg = useMemo(() => PIZZA_SIZES.reduce((sum, p) => sum + (Math.max(0, Number(pizzaCounts[p.name])) || 0) * p.weightG, 0) / 1000, [pizzaCounts]);
+  const scaledTotalKg = scaled.reduce((sum, ingredient) => sum + ingredient.amountKg, 0);
+
+  const scaleRecipe = (value) => {
+    const total = Number(value);
+    if (!Number.isFinite(total) || total <= 0) return;
+    const factor = total / BASE_TOTAL;
+    setScaled(BASE_RECIPE.map((ingredient) => ({ ...ingredient, amountKg: ingredient.amountKg * factor })));
+    const grams = kgToGrams(total);
+    const even = Math.floor(grams / batches.length);
+    setBatches(Array.from({ length: batches.length }, (_, i) => gramsToKg(even + (i === batches.length - 1 ? grams - even * batches.length : 0))));
+    setDone({});
   };
-
-  const calcPizzaTotal = () => {
-    const totalG = PIZZA_SIZES.reduce(
-      (sum, p) => sum + (parseInt(pizzaCounts[p.name]) || 0) * p.weightG,
-      0
-    );
-    const kg = totalG / 1000;
-    setDesiredKg(kg);
-    scaleRecipe(kg);
+  const usePizzaTotal = () => {
+    if (pizzaTotalKg <= 0) return;
+    setDesiredKg(String(pizzaTotalKg));
+    scaleRecipe(pizzaTotalKg);
   };
-
-  const toggleExpand = (i) => setExpanded(e => ({ ...e, [i]: !e[i] }));
-  const toggleDone = (i) => setDone(d => ({ ...d, [i]: !d[i] }));
+  const setBatchCount = (n) => {
+    const totalGrams = kgToGrams(Number(desiredKg) || 0);
+    const even = Math.floor(totalGrams / n);
+    setBatches(Array.from({ length: n }, (_, i) => gramsToKg(even + (i === n - 1 ? totalGrams - even * n : 0))));
+    setDone({}); setExpanded({});
+  };
+  const adjustBatch = (index, newValue) => {
+    const totalGrams = kgToGrams(Number(desiredKg) || 0);
+    if (totalGrams <= 0 || batches.length < 2) return;
+    const weights = batches.map((v) => kgToGrams(Number(v) || 0));
+    const target = Math.min(totalGrams, Math.max(0, Math.round(newValue)));
+    const otherIndices = weights.map((_, i) => i).filter((i) => i !== index);
+    const otherTotal = totalGrams - target;
+    const otherOldTotal = otherIndices.reduce((sum, i) => sum + weights[i], 0);
+    const updated = Array(weights.length).fill(0);
+    updated[index] = target;
+    let remaining = otherTotal;
+    otherIndices.forEach((i, j) => {
+      const weight = j === otherIndices.length - 1 ? remaining : otherOldTotal > 0 ? Math.min(remaining, Math.round(otherTotal * weights[i] / otherOldTotal)) : Math.floor(otherTotal / otherIndices.length);
+      updated[i] = weight;
+      remaining -= weight;
+    });
+    setBatches(updated.map(gramsToKg));
+  };
+  const ingredientRows = (items) => items.map((ingredient) => <div key={ingredient.name} className="dp-ingredient"><span>{ingredient.name}</span><strong>{formatUnit(ingredient.amountKg)}</strong></div>);
 
   return (
-    <div className="min-h-screen flex flex-col items-center p-6 text-neutral-100 bg-neutral-900">
-      <h1 className="text-3xl font-bold mb-6 text-amber-400">Dough Planner</h1>
+    <div className="dp-root" style={cssVars}>
+      <style>{`
+        .dp-root{min-height:100vh;background:var(--dp-bg);color:var(--dp-text);font-family:var(--dp-font);font-size:var(--dp-size);padding:20px 12px 60px}
+        .dp-root *{box-sizing:border-box}.dp-shell{max-width:1020px;margin:auto}.dp-header{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:20px}
+        .dp-title{font-size:1.7em;font-weight:800;letter-spacing:-.035em;color:var(--dp-accent)}.dp-subtitle,.dp-muted{color:var(--dp-muted)}.dp-subtitle{font-size:.78em}
+        .dp-panel{background:var(--dp-card);border:1px solid var(--dp-border);border-radius:15px;padding:18px;min-width:0}
+        .dp-panel-title{font-size:1.12em;font-weight:750;margin:0 0 13px}.dp-button{background:var(--dp-accent);color:var(--dp-on-accent);border:0;border-radius:8px;padding:10px 13px;font-weight:750;cursor:pointer;min-height:40px}
+        .dp-button:disabled{opacity:.45;cursor:not-allowed}.dp-ghost{background:var(--dp-input);color:var(--dp-text);border:1px solid var(--dp-border);border-radius:8px;padding:9px 12px;cursor:pointer;min-height:40px}
+        .dp-input,.dp-select{background:var(--dp-input);color:var(--dp-text);border:1px solid var(--dp-border);border-radius:8px;padding:9px 10px;min-width:0;max-width:100%;font:inherit}
+        .dp-input:focus-visible,.dp-select:focus-visible,.dp-button:focus-visible,.dp-ghost:focus-visible{outline:2px solid var(--dp-accent);outline-offset:2px}
+        .dp-input[type=number]{font-variant-numeric:tabular-nums}.dp-root input[type=range],.dp-root input[type=checkbox]{accent-color:var(--dp-accent)}
+        .dp-layout-tabs{display:flex;gap:7px;margin-bottom:16px}.dp-layout-tabs button{flex:0 0 auto}.dp-layout-tabs .selected{background:var(--dp-accent);color:var(--dp-on-accent);border-color:var(--dp-accent)}
+        .dp-morning{display:grid;grid-template-columns:1fr;gap:15px;margin-bottom:15px}.dp-compact .dp-morning{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+        .dp-pizza-row{display:grid;grid-template-columns:minmax(0,1fr) 80px;gap:10px;align-items:center;margin-bottom:8px}.dp-pizza-row .dp-input{width:100%;text-align:center}
+        .dp-compact .dp-pizza-row{grid-template-columns:minmax(0,1fr) 58px;gap:5px}.dp-compact .dp-pizza-row .dp-input{padding:7px 3px}.dp-compact .dp-panel{padding:12px}.dp-compact .dp-panel-title{font-size:1em}
+        .dp-ingredient{display:flex;justify-content:space-between;gap:8px;padding:6px 0;border-bottom:1px solid var(--dp-border);font-size:.88em}.dp-ingredient:last-child{border-bottom:0}.dp-ingredient strong{color:var(--dp-accent);white-space:nowrap;font-variant-numeric:tabular-nums}
+        .dp-compact .dp-morning .dp-ingredient{font-size:.76em}.dp-pizza-total{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap}.dp-pizza-total strong{color:var(--dp-accent);font-size:1.15em}
+        .dp-compact .dp-pizza-total .dp-button{width:100%}.dp-scale-row{display:flex;gap:8px;margin-bottom:12px}.dp-scale-row .dp-input{flex:1;width:0}.dp-compact .dp-scale-row{flex-wrap:wrap}.dp-compact .dp-scale-row .dp-button{width:100%}
+        .dp-divider-header{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px}.dp-batch{background:var(--dp-input);border:1px solid var(--dp-border);border-radius:11px;padding:13px;margin-top:10px}
+        .dp-batch-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dp-batch-label{display:flex;align-items:center;gap:10px;font-weight:700}.dp-batch-label input{width:19px;height:19px}
+        .dp-batch-controls{display:flex;align-items:center;gap:8px}.dp-batch-controls .dp-input{width:100px;text-align:center}.dp-batch-details{background:var(--dp-card);padding:12px;border-radius:9px;margin-top:12px}.dp-batch-details .dp-ingredient{font-size:.85em}
+        .dp-done .dp-batch-label span{text-decoration:line-through;opacity:.55}.dp-batch-slider{width:100%;margin-top:12px;min-height:24px;cursor:pointer}
+        .dp-settings{margin-bottom:16px}.dp-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.dp-field{display:flex;flex-direction:column;gap:6px;font-size:.9em}.dp-field .dp-select{width:100%}
+        .dp-palettes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin:12px 0 18px}.dp-palette{background:transparent;border:1px solid transparent;border-radius:9px;color:var(--dp-text);padding:5px;cursor:pointer;font-size:.75em}
+        .dp-palette.selected{border-color:var(--dp-accent);background:var(--dp-input)}.dp-palette-swatch{height:34px;border-radius:6px;border:1px solid #8886;margin-bottom:5px;position:relative}.dp-palette-swatch:after{content:"";position:absolute;right:7px;top:8px;width:16px;height:16px;border-radius:50%;background:var(--swatch-accent)}
+        .dp-setting-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--dp-border);padding:14px 0}.dp-setting-toggle input{width:20px;height:20px}.dp-small{font-size:.8em}.dp-collapsed{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:15px}
+        @media(max-width:480px){.dp-root{padding:12px 8px 50px}.dp-panel{padding:12px}.dp-compact .dp-panel{padding:8px}.dp-compact .dp-pizza-row{grid-template-columns:minmax(0,1fr) 39px;gap:3px}.dp-compact .dp-pizza-row .dp-input{padding:6px 1px;font-size:.8em}.dp-compact .dp-pizza-row label{font-size:.77em}.dp-compact .dp-morning .dp-ingredient{font-size:.68em}.dp-compact .dp-panel-title{font-size:.85em}.dp-compact .dp-pizza-total{font-size:.8em}.dp-batch-controls .dp-input{width:83px}.dp-settings-grid{gap:9px}.dp-palettes{gap:3px}.dp-palette{font-size:.65em;padding:3px}.dp-title{font-size:1.4em}}
+      `}</style>
+      <div className="dp-shell">
+        <header className="dp-header"><div><h1 className="dp-title">Dough Planner</h1><div className="dp-subtitle">Pizza dough calculator</div></div><button className="dp-ghost" onClick={() => setSettingsOpen((v) => !v)} aria-expanded={settingsOpen} aria-label="Appearance and settings">⚙ Settings</button></header>
 
-      {/* Pizza Calculator */}
-      <div className="bg-neutral-800 rounded-2xl p-4 w-full max-w-xl mb-6">
-        <h2 className="text-xl font-semibold mb-3">Pizza Calculator</h2>
-        {PIZZA_SIZES.map((p) => (
-          <div key={p.name} className="flex justify-between mb-2">
-            <span>{p.name} ({p.weightG}g)</span>
-            <input
-              type="number"
-              className="w-20 bg-neutral-700 rounded px-2 text-center"
-              value={pizzaCounts[p.name]}
-              onChange={(e) => setPizzaCounts({ ...pizzaCounts, [p.name]: e.target.value })}
-            />
+        {settingsOpen && <section className="dp-panel dp-settings" aria-label="Settings">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}><h2 className="dp-panel-title">Appearance & Settings</h2><button className="dp-ghost" onClick={() => setSettingsOpen(false)}>Close</button></div>
+          <div className="dp-small dp-muted">Colour palette</div>
+          <div className="dp-palettes">{Object.entries(THEMES).map(([name, colors]) => <button key={name} type="button" className={`dp-palette ${settings.theme === name ? "selected" : ""}`} onClick={() => updateSettings({ theme: name })} aria-pressed={settings.theme === name}><div className="dp-palette-swatch" style={{ background: colors.bg, "--swatch-accent": colors.accent }} />{name}</button>)}</div>
+          <div className="dp-settings-grid">
+            <label className="dp-field">Layout<select className="dp-select" value={settings.layout} onChange={(e) => updateSettings({ layout: e.target.value })}><option value="classic">Classic</option><option value="compact">Compact</option></select></label>
+            <label className="dp-field">Font family<select className="dp-select" value={settings.font} onChange={(e) => updateSettings({ font: e.target.value })}><option value="modern">Modern Sans</option><option value="rounded">Rounded</option><option value="serif">Editorial Serif</option><option value="mono">Monospace</option></select></label>
+            <label className="dp-field">Text colour<select className="dp-select" value={settings.textColor} onChange={(e) => updateSettings({ textColor: e.target.value })}><option value="default">Theme default</option><option value="warm">Warm cream</option><option value="bright">Bright white</option><option value="soft">Soft grey</option></select></label>
+            <label className="dp-field">Font size: {settings.fontSize}%<input type="range" min="85" max="135" step="5" value={settings.fontSize} onChange={(e) => updateSettings({ fontSize: Number(e.target.value) })} /></label>
           </div>
-        ))}
-        <button onClick={calcPizzaTotal} className="w-full bg-amber-400 text-black py-2 rounded-md mt-3 font-bold">
-          Use for Scaling
-        </button>
-      </div>
+          <label className="dp-setting-toggle"><span><strong>Remember appearance</strong><div className="dp-small dp-muted">Save the selected appearance on this device</div></span><input type="checkbox" checked={settings.remember} onChange={(e) => updateSettings({ remember: e.target.checked })} /></label>
+          <label className="dp-setting-toggle"><span><strong>Keep screen awake</strong><div className="dp-small dp-muted">{awakeActive ? "Active while this page is visible" : awakeMessage || "Available on supported devices and browsers"}</div></span><input type="checkbox" checked={settings.keepAwake} onChange={(e) => updateSettings({ keepAwake: e.target.checked })} /></label>
+          <button className="dp-ghost" onClick={() => setSettings((old) => ({ ...DEFAULT_SETTINGS, keepAwake: false }))}>Reset appearance</button>
+        </section>}
 
-      {/* Total Amount (was "Scale Recipe") */}
-      <div className="bg-neutral-800 rounded-2xl p-4 w-full max-w-xl mb-6">
-        <h2 className="text-xl font-semibold mb-3">Total Amount</h2>
-
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <div className="flex-1 min-w-[150px]">
-            <input
-              type="number"
-              placeholder="Amount"
-              value={desiredKg}
-              onChange={(e) => setDesiredKg(e.target.value)}
-              className="w-full bg-neutral-700 rounded px-2 py-1 text-center"
-            />
-          </div>
-          <button
-            onClick={() => scaleRecipe(desiredKg)}
-            className="bg-amber-400 text-black px-4 py-1 rounded font-bold whitespace-nowrap"
-          >
-            Scale
-          </button>
-        </div>
-
-        {scaled.map((i) => (
-          <div key={i.name} className="flex justify-between text-sm py-1 border-b border-neutral-700">
-            <span>{i.name}</span>
-            <span>{formatUnit(i.amountKg)}</span>
-          </div>
-        ))}
-      </div>
-
-      {/* Batch Divider */}
-      <div className="bg-neutral-800 rounded-2xl p-4 w-full max-w-xl">
-        <h2 className="text-xl font-semibold mb-3">Batch Divider</h2>
-
-        <div className="flex justify-between items-center mb-3">
-          <span>Number of batches</span>
-          <select
-            value={batches.length}
-            className="bg-neutral-700 rounded px-2 py-1 text-center"
-            onChange={(e) => {
-              const n = parseInt(e.target.value);
-              const total = parseFloat(desiredKg) || 0;
-              const even = total > 0 ? total / n : 0;
-              setBatches(Array(n).fill(even.toFixed(2)));
-              setDone({});
-            }}
-          >
-            {[1, 2, 3, 4, 5].map((n) => (
-              <option key={n} value={n}>{n}</option>
-            ))}
-          </select>
-        </div>
-
-        {batches.map((v, i) => (
-          <div
-            key={i}
-            className={`mb-3 border-b border-neutral-700 pb-3 transition-all ${
-              done[i] ? "opacity-50 line-through" : ""
-            }`}
-          >
-            <div className="flex justify-between items-center mb-1">
-              <div className="flex items-center gap-2">
-                <input
-                  type="checkbox"
-                  checked={done[i] || false}
-                  onChange={() => toggleDone(i)}
-                  className="accent-amber-400"
-                />
-                <span>Batch {i + 1}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="number"
-                  value={v}
-                  step="0.1"
-                  className="w-24 bg-neutral-700 rounded px-2 text-center"
-                  onChange={(e) => {
-                    const arr = [...batches];
-                    arr[i] = e.target.value;
-                    setBatches(arr);
-                  }}
-                />
-                <button
-                  className="ml-2 text-amber-400"
-                  onClick={() => toggleExpand(i)}
-                >
-                  {expanded[i] ? "Hide" : "Show"}
-                </button>
-              </div>
+        <div className="dp-layout-tabs" role="group" aria-label="Layout"><button className={`dp-ghost ${settings.layout === "classic" ? "selected" : ""}`} onClick={() => updateSettings({ layout: "classic" })}>Classic</button><button className={`dp-ghost ${settings.layout === "compact" ? "selected" : ""}`} onClick={() => updateSettings({ layout: "compact" })}>Compact</button></div>
+        <main className={settings.layout === "compact" ? "dp-compact" : "dp-classic"}>
+          {morningCollapsed ? <div className="dp-panel dp-collapsed"><div><strong>Morning setup</strong><div className="dp-small dp-muted">{scaledTotalKg.toFixed(2)} kg scaled recipe</div></div><button className="dp-ghost" onClick={() => setMorningCollapsed(false)}>Expand ▾</button></div> : <>
+            <div className="dp-morning">
+              <section className="dp-panel"><h2 className="dp-panel-title">Pizza Calculator</h2>{PIZZA_SIZES.map((p) => <div key={p.name} className="dp-pizza-row"><label htmlFor={`pizza-${p.name}`}>{p.name} <span className="dp-muted">({p.weightG}g)</span></label><input id={`pizza-${p.name}`} type="number" min="0" step="1" className="dp-input" value={pizzaCounts[p.name]} onChange={(e) => setPizzaCounts((old) => ({ ...old, [p.name]: e.target.value }))} /></div>)}<div className="dp-pizza-total"><div><div className="dp-muted dp-small">Total dough required</div><strong>{pizzaTotalKg.toFixed(2)} kg</strong></div><button className="dp-button" onClick={usePizzaTotal} disabled={pizzaTotalKg <= 0}>Use for Scaling</button></div></section>
+              <section className="dp-panel"><h2 className="dp-panel-title">Total Amount</h2><div className="dp-scale-row"><input type="number" min="0" step="0.01" placeholder="Amount in kg" aria-label="Total dough amount in kilograms" className="dp-input" value={desiredKg} onChange={(e) => setDesiredKg(e.target.value)} /><button className="dp-button" onClick={() => scaleRecipe(desiredKg)}>Scale</button></div>{ingredientRows(scaled)}</section>
             </div>
-
-            {batches.length > 1 && (
-              <input
-                type="range"
-                min="0"
-                max="100"
-                value={
-                  ((parseFloat(v) || 0) /
-                    (parseFloat(desiredKg) || 1)) *
-                  100
-                }
-                onChange={(e) => {
-                  const total = parseFloat(desiredKg) || 0;
-                  const percent = e.target.value / 100;
-                  const arr = [...batches];
-                  const newVal = total * percent;
-                  let diff = newVal - parseFloat(v || 0);
-                  arr[i] = newVal.toFixed(2);
-
-                  const laterIdx = arr
-                    .map((_, idx) => idx)
-                    .filter((idx) => idx > i);
-                  const sumLater = laterIdx.reduce(
-                    (s, idx) => s + parseFloat(arr[idx] || 0),
-                    0
-                  );
-
-                  laterIdx.forEach((idx) => {
-                    if (sumLater > 0) {
-                      const share = parseFloat(arr[idx]) / sumLater;
-                      arr[idx] = (parseFloat(arr[idx]) - diff * share).toFixed(2);
-                    }
-                  });
-
-                  const sumNow = arr.reduce((a, b) => a + parseFloat(b), 0);
-                  if (Math.abs(sumNow - total) > 0.01) {
-                    const adjust = total - sumNow;
-                    arr[arr.length - 1] = (parseFloat(arr[arr.length - 1]) + adjust).toFixed(2);
-                  }
-
-                  setBatches(arr);
-                }}
-                className="w-full accent-amber-400"
-              />
-            )}
-
-            {expanded[i] && (
-              <div className="bg-neutral-900 rounded-lg p-2 mt-2">
-                {scaled.map((ing) => {
-                  const total = parseFloat(desiredKg) || 0;
-                  const factor = total > 0 ? (parseFloat(v) || 0) / total : 0;
-                  return (
-                    <div key={ing.name} className="flex justify-between text-sm py-0.5">
-                      <span>{ing.name}</span>
-                      <span>
-                        {ing.amountKg * factor < 1
-                          ? `${Math.round(ing.amountKg * factor * 1000)} g`
-                          : `${(ing.amountKg * factor).toFixed(2)} kg`}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}><button className="dp-ghost" onClick={() => setMorningCollapsed(true)}>Hide ▴</button></div>
+          </>}
+          <section className="dp-panel"><div className="dp-divider-header"><div><h2 className="dp-panel-title" style={{ marginBottom: 3 }}>Batch Divider</h2><div className="dp-small dp-muted">{Number(desiredKg) > 0 ? `${Number(desiredKg).toFixed(2)} kg planned dough` : "Scale a recipe to begin"}</div></div><label className="dp-small">Number of batches <select className="dp-select" style={{ marginLeft: 7 }} value={batches.length} onChange={(e) => setBatchCount(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}</select></label></div>
+            {batches.map((v, i) => <div key={i} className={`dp-batch ${done[i] ? "dp-done" : ""}`}><div className="dp-batch-top"><label className="dp-batch-label"><input type="checkbox" checked={!!done[i]} onChange={() => setDone((old) => ({ ...old, [i]: !old[i] }))} /><span>Batch {i + 1}</span></label><div className="dp-batch-controls"><input className="dp-input" type="number" min="0" step="0.01" aria-label={`Batch ${i + 1} weight in kilograms`} value={v} onChange={(e) => setBatches((old) => old.map((x, index) => index === i ? e.target.value : x))} /><span className="dp-small dp-muted">kg</span><button className="dp-ghost" aria-expanded={!!expanded[i]} onClick={() => setExpanded((old) => ({ ...old, [i]: !old[i] }))}>{expanded[i] ? "Hide ▴" : "Show ▾"}</button></div></div>
+              {batches.length > 1 && <input className="dp-batch-slider" type="range" min="0" max={kgToGrams(Number(desiredKg) || 0)} step="10" value={kgToGrams(Number(v) || 0)} aria-label={`Adjust batch ${i + 1} weight`} disabled={!(Number(desiredKg) > 0)} onChange={(e) => adjustBatch(i, Number(e.target.value))} />}
+              {expanded[i] && <div className="dp-batch-details">{ingredientRows(scaled.map((ingredient) => ({ ...ingredient, amountKg: ingredient.amountKg * ((Number(v) || 0) / (scaledTotalKg || 1)) })))}</div>}
+            </div>)}
+          </section>
+        </main>
       </div>
     </div>
   );
