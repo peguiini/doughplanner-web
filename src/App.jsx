@@ -18,6 +18,7 @@ const PIZZA_SIZES = [
   { name: "M", weightG: 360 },
   { name: "L", weightG: 540 },
   { name: "Thin Crispy", weightG: 200 },
+  { name: "Deep Dish", weightG: 250 },
 ];
 
 const formatUnit = (kg) => (kg < 1 ? `${Math.round(kg * 1000)} g` : `${kg.toFixed(2)} kg`);
