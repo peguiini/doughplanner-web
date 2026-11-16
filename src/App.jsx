@@ -27,8 +27,8 @@ const THEMES = {
   Terracotta: { bg: "#30201e", card: "#472d29", input: "#382522", border: "#654039", text: "#f9eae1", muted: "#d3aca1", accent: "#e6a080", onAccent: "#30201e" },
   Slate: { bg: "#20282b", card: "#2e393d", input: "#253034", border: "#465359", text: "#f0f4f2", muted: "#b0bec1", accent: "#a1c6c3", onAccent: "#20282b" },
   Lavender: { bg: "#272335", card: "#383247", input: "#2e293b", border: "#524b64", text: "#f5f0fa", muted: "#c4b6d3", accent: "#c9afe9", onAccent: "#272335" },
-  Cream: { bg: "#f5f0e6", card: "#fffdf8", input: "#f5f0e6", border: "#ded6c8", text: "#342c25", muted: "#776b5e", accent: "#ae764d", onAccent: "#ffffff" },
-  Sage: { bg: "#e8ede5", card: "#f9fbf7", input: "#edf3e9", border: "#cdd9ca", text: "#273a2f", muted: "#657a6c", accent: "#62896e", onAccent: "#ffffff" },
+  Cream: { bg: "#f5f0e6", card: "#fffdf8", input: "#f5f0e6", border: "#b5a796", text: "#241b15", muted: "#5d5044", accent: "#ae764d", onAccent: "#ffffff" },
+  Sage: { bg: "#e8ede5", card: "#f9fbf7", input: "#edf3e9", border: "#9dad9c", text: "#172b20", muted: "#465c4d", accent: "#62896e", onAccent: "#ffffff" },
 };
 const DEFAULT_SETTINGS = { layout: "classic", theme: "Coffee", font: "modern", fontSize: 100, textColor: "default", remember: true, keepAwake: false };
 const FONT_FAMILIES = { modern: 'system-ui, -apple-system, sans-serif', rounded: '"Trebuchet MS", system-ui, sans-serif', serif: 'Georgia, "Times New Roman", serif', mono: 'Consolas, "Courier New", monospace' };
@@ -39,8 +39,29 @@ const gramsToKg = (g) => (g / 1000).toFixed(2);
 const readSettings = () => {
   try {
     const saved = JSON.parse(localStorage.getItem("doughplanner-appearance") || "null");
-    return saved && saved.remember !== false ? { ...DEFAULT_SETTINGS, ...saved, keepAwake: false } : DEFAULT_SETTINGS;
+    return saved && saved.remember !== false ? { ...DEFAULT_SETTINGS, ...saved } : DEFAULT_SETTINGS;
   } catch { return DEFAULT_SETTINGS; }
+};
+
+const EMPTY_PIZZAS = Object.fromEntries(PIZZA_SIZES.map((p) => [p.name, ""]));
+const EMPTY_DOUGH = { desiredKg: "", pizzaCounts: EMPTY_PIZZAS, batches: [""], done: {}, expanded: {} };
+const readDough = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem("doughplanner-dough-v1") || "null");
+    if (!saved || typeof saved !== "object") return { ...EMPTY_DOUGH, restore: null };
+    const valid = (v) => typeof v === "string" && (v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0));
+    const normalize = (data) => {
+      if (!data || !valid(data.desiredKg)) return null;
+      return {
+        desiredKg: data.desiredKg,
+        pizzaCounts: Object.fromEntries(PIZZA_SIZES.map((p) => [p.name, valid(data.pizzaCounts?.[p.name]) ? data.pizzaCounts[p.name] : ""])),
+        batches: Array.isArray(data.batches) && data.batches.length >= 1 && data.batches.length <= 5 && data.batches.every(valid) ? data.batches : [""],
+        done: data.done && typeof data.done === "object" ? data.done : {},
+        expanded: data.expanded && typeof data.expanded === "object" ? data.expanded : {},
+      };
+    };
+    return { ...(normalize(saved) || EMPTY_DOUGH), restore: normalize(saved.restore) };
+  } catch { return { ...EMPTY_DOUGH, restore: null }; }
 };
 
 export default function App() {
@@ -49,20 +70,40 @@ export default function App() {
   const [awakeActive, setAwakeActive] = useState(false);
   const [awakeMessage, setAwakeMessage] = useState("");
   const [morningCollapsed, setMorningCollapsed] = useState(false);
-  const [desiredKg, setDesiredKg] = useState("");
-  const [scaled, setScaled] = useState(BASE_RECIPE);
-  const [pizzaCounts, setPizzaCounts] = useState(Object.fromEntries(PIZZA_SIZES.map((p) => [p.name, ""])));
-  const [batches, setBatches] = useState([""]);
-  const [expanded, setExpanded] = useState({});
-  const [done, setDone] = useState({});
+  const [initialDough] = useState(readDough);
+  const [desiredKg, setDesiredKg] = useState(initialDough.desiredKg);
+  const [pizzaCounts, setPizzaCounts] = useState(initialDough.pizzaCounts);
+  const [batches, setBatches] = useState(initialDough.batches);
+  const [expanded, setExpanded] = useState(initialDough.expanded);
+  const [done, setDone] = useState(initialDough.done);
+  const [restoreSnapshot, setRestoreSnapshot] = useState(initialDough.restore);
+  const snapshot = () => ({ desiredKg, pizzaCounts: { ...pizzaCounts }, batches: [...batches], done: { ...done }, expanded: { ...expanded } });
+  const zeroDough = () => {
+    if (!(Number(desiredKg) > 0 || Object.values(pizzaCounts).some((v) => Number(v) > 0))) return;
+    setRestoreSnapshot(snapshot());
+    setDesiredKg("0"); setPizzaCounts({ ...EMPTY_PIZZAS });
+    setBatches(Array(batches.length).fill("0.00")); setDone({}); setExpanded({});
+  };
+  const restoreDough = () => {
+    if (!restoreSnapshot) return;
+    setDesiredKg(restoreSnapshot.desiredKg); setPizzaCounts(restoreSnapshot.pizzaCounts);
+    setBatches(restoreSnapshot.batches); setDone(restoreSnapshot.done); setExpanded(restoreSnapshot.expanded);
+    setRestoreSnapshot(null);
+  };
 
   const updateSettings = (patch) => setSettings((old) => ({ ...old, ...patch }));
   useEffect(() => {
     try {
-      if (settings.remember) localStorage.setItem("doughplanner-appearance", JSON.stringify({ ...settings, keepAwake: false }));
+      if (settings.remember) localStorage.setItem("doughplanner-appearance", JSON.stringify(settings));
       else localStorage.removeItem("doughplanner-appearance");
     } catch { /* Storage may be unavailable in private browsing. */ }
   }, [settings]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("doughplanner-dough-v1", JSON.stringify({ desiredKg, pizzaCounts, batches, done, expanded, restore: restoreSnapshot }));
+    } catch { /* Local storage may be unavailable. */ }
+  }, [desiredKg, pizzaCounts, batches, done, expanded, restoreSnapshot]);
 
   useEffect(() => {
     if (!settings.keepAwake) { setAwakeActive(false); setAwakeMessage(""); return; }
@@ -86,16 +127,21 @@ export default function App() {
   }, [settings.keepAwake]);
 
   const theme = THEMES[settings.theme] || THEMES.Coffee;
-  const text = settings.textColor === "warm" ? "#f5e8d6" : settings.textColor === "bright" ? "#ffffff" : settings.textColor === "soft" ? "#bfc6c4" : theme.text;
+  const lightTheme = ["Cream", "Sage"].includes(settings.theme);
+  // Light palettes must not inherit pale text choices intended for dark backgrounds.
+  const text = lightTheme ? theme.text : settings.textColor === "warm" ? "#f5e8d6" : settings.textColor === "bright" ? "#ffffff" : settings.textColor === "soft" ? "#bfc6c4" : theme.text;
   const cssVars = { "--dp-bg": theme.bg, "--dp-card": theme.card, "--dp-input": theme.input, "--dp-border": theme.border, "--dp-text": text, "--dp-muted": theme.muted, "--dp-accent": theme.accent, "--dp-on-accent": theme.onAccent, "--dp-font": FONT_FAMILIES[settings.font] || FONT_FAMILIES.modern, "--dp-size": `${settings.fontSize}%` };
   const pizzaTotalKg = useMemo(() => PIZZA_SIZES.reduce((sum, p) => sum + (Math.max(0, Number(pizzaCounts[p.name])) || 0) * p.weightG, 0) / 1000, [pizzaCounts]);
+  const scaled = useMemo(() => {
+    const total = Number(desiredKg);
+    return Number.isFinite(total) && total > 0 ? BASE_RECIPE.map((ingredient) => ({ ...ingredient, amountKg: ingredient.amountKg * total / BASE_TOTAL })) : BASE_RECIPE.map((ingredient) => ({ ...ingredient, amountKg: 0 }));
+  }, [desiredKg]);
   const scaledTotalKg = scaled.reduce((sum, ingredient) => sum + ingredient.amountKg, 0);
 
   const scaleRecipe = (value) => {
     const total = Number(value);
-    if (!Number.isFinite(total) || total <= 0) return;
-    const factor = total / BASE_TOTAL;
-    setScaled(BASE_RECIPE.map((ingredient) => ({ ...ingredient, amountKg: ingredient.amountKg * factor })));
+    if (!Number.isFinite(total) || total < 0) return;
+    setDesiredKg(String(total));
     const grams = kgToGrams(total);
     const even = Math.floor(grams / batches.length);
     setBatches(Array.from({ length: batches.length }, (_, i) => gramsToKg(even + (i === batches.length - 1 ? grams - even * batches.length : 0))));
@@ -103,7 +149,6 @@ export default function App() {
   };
   const usePizzaTotal = () => {
     if (pizzaTotalKg <= 0) return;
-    setDesiredKg(String(pizzaTotalKg));
     scaleRecipe(pizzaTotalKg);
   };
   const setBatchCount = (n) => {
@@ -154,11 +199,12 @@ export default function App() {
         .dp-batch-top{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}.dp-batch-label{display:flex;align-items:center;gap:10px;font-weight:700}.dp-batch-label input{width:19px;height:19px}
         .dp-batch-controls{display:flex;align-items:center;gap:8px}.dp-batch-controls .dp-input{width:100px;text-align:center}.dp-batch-details{background:var(--dp-card);padding:12px;border-radius:9px;margin-top:12px}.dp-batch-details .dp-ingredient{font-size:.85em}
         .dp-done .dp-batch-label span{text-decoration:line-through;opacity:.55}.dp-batch-slider{width:100%;margin-top:12px;min-height:24px;cursor:pointer}
+        .dp-morning-toolbar{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}.dp-morning-actions{display:flex;gap:5px;align-items:center}.dp-mini{min-height:29px!important;padding:4px 9px!important;font-size:.78em;line-height:1.1}.dp-mini:disabled{opacity:.4}
         .dp-settings{margin-bottom:16px}.dp-settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.dp-field{display:flex;flex-direction:column;gap:6px;font-size:.9em}.dp-field .dp-select{width:100%}
         .dp-palettes{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:9px;margin:12px 0 18px}.dp-palette{background:transparent;border:1px solid transparent;border-radius:9px;color:var(--dp-text);padding:5px;cursor:pointer;font-size:.75em}
         .dp-palette.selected{border-color:var(--dp-accent);background:var(--dp-input)}.dp-palette-swatch{height:34px;border-radius:6px;border:1px solid #8886;margin-bottom:5px;position:relative}.dp-palette-swatch:after{content:"";position:absolute;right:7px;top:8px;width:16px;height:16px;border-radius:50%;background:var(--swatch-accent)}
         .dp-setting-toggle{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--dp-border);padding:14px 0}.dp-setting-toggle input{width:20px;height:20px}.dp-small{font-size:.8em}.dp-collapsed{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:15px}
-        @media(max-width:480px){.dp-root{padding:12px 8px 50px}.dp-panel{padding:12px}.dp-compact .dp-panel{padding:8px}.dp-compact .dp-pizza-row{grid-template-columns:minmax(0,1fr) 39px;gap:3px}.dp-compact .dp-pizza-row .dp-input{padding:6px 1px;font-size:.8em}.dp-compact .dp-pizza-row label{font-size:.77em}.dp-compact .dp-morning .dp-ingredient{font-size:.68em}.dp-compact .dp-panel-title{font-size:.85em}.dp-compact .dp-pizza-total{font-size:.8em}.dp-batch-controls .dp-input{width:83px}.dp-settings-grid{gap:9px}.dp-palettes{gap:3px}.dp-palette{font-size:.65em;padding:3px}.dp-title{font-size:1.4em}}
+        @media(max-width:480px){.dp-morning-toolbar{flex-wrap:nowrap}.dp-morning-actions{gap:3px}.dp-mini{padding:4px 6px!important;font-size:.72em}.dp-root{padding:12px 8px 50px}.dp-panel{padding:12px}.dp-compact .dp-panel{padding:8px}.dp-compact .dp-pizza-row{grid-template-columns:minmax(0,1fr) 39px;gap:3px}.dp-compact .dp-pizza-row .dp-input{padding:6px 1px;font-size:.8em}.dp-compact .dp-pizza-row label{font-size:.77em}.dp-compact .dp-morning .dp-ingredient{font-size:.68em}.dp-compact .dp-panel-title{font-size:.85em}.dp-compact .dp-pizza-total{font-size:.8em}.dp-batch-controls .dp-input{width:83px}.dp-settings-grid{gap:9px}.dp-palettes{gap:3px}.dp-palette{font-size:.65em;padding:3px}.dp-title{font-size:1.4em}}
       `}</style>
       <div className="dp-shell">
         <header className="dp-header"><div><h1 className="dp-title">Dough Planner</h1><div className="dp-subtitle">Pizza dough calculator</div></div><button className="dp-ghost" onClick={() => setSettingsOpen((v) => !v)} aria-expanded={settingsOpen} aria-label="Appearance and settings">⚙ Settings</button></header>
@@ -179,12 +225,12 @@ export default function App() {
         </section>}
 
         <main className={settings.layout === "compact" ? "dp-compact" : "dp-classic"}>
-          {morningCollapsed ? <div className="dp-panel dp-collapsed"><div><strong>Morning setup</strong><div className="dp-small dp-muted">{scaledTotalKg.toFixed(2)} kg scaled recipe</div></div><button className="dp-ghost" onClick={() => setMorningCollapsed(false)}>Expand ▾</button></div> : <>
+          <div className="dp-morning-toolbar"><strong className="dp-small">Morning setup</strong><div className="dp-morning-actions"><button className="dp-ghost dp-mini" onClick={zeroDough} disabled={!(Number(desiredKg) > 0 || Object.values(pizzaCounts).some((v) => Number(v) > 0))}>Zero</button><button className="dp-ghost dp-mini" onClick={restoreDough} disabled={!restoreSnapshot}>Restore</button><button className="dp-ghost dp-mini" onClick={() => setMorningCollapsed((v) => !v)}>{morningCollapsed ? "Expand ▾" : "Hide ▴"}</button></div></div>
+          {!morningCollapsed && <>
             <div className="dp-morning">
               <section className="dp-panel"><h2 className="dp-panel-title">Pizza Calculator</h2>{PIZZA_SIZES.map((p) => <div key={p.name} className="dp-pizza-row"><label htmlFor={`pizza-${p.name}`}>{p.name} <span className="dp-muted">({p.weightG}g)</span></label><input id={`pizza-${p.name}`} type="number" min="0" step="1" className="dp-input" value={pizzaCounts[p.name]} onChange={(e) => setPizzaCounts((old) => ({ ...old, [p.name]: e.target.value }))} /></div>)}<div className="dp-pizza-total"><div><div className="dp-muted dp-small">Total dough required</div><strong>{pizzaTotalKg.toFixed(2)} kg</strong></div><button className="dp-button" onClick={usePizzaTotal} disabled={pizzaTotalKg <= 0}>Use for Scaling</button></div></section>
               <section className="dp-panel"><h2 className="dp-panel-title">Total Amount</h2><div className="dp-scale-row"><input type="number" min="0" step="0.01" placeholder="Amount in kg" aria-label="Total dough amount in kilograms" className="dp-input" value={desiredKg} onChange={(e) => setDesiredKg(e.target.value)} /><button className="dp-button" onClick={() => scaleRecipe(desiredKg)}>Scale</button></div>{ingredientRows(scaled)}</section>
             </div>
-            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}><button className="dp-ghost" onClick={() => setMorningCollapsed(true)}>Hide ▴</button></div>
           </>}
           <section className="dp-panel"><div className="dp-divider-header"><div><h2 className="dp-panel-title" style={{ marginBottom: 3 }}>Batch Divider</h2><div className="dp-small dp-muted">{Number(desiredKg) > 0 ? `${Number(desiredKg).toFixed(2)} kg planned dough` : "Scale a recipe to begin"}</div></div><label className="dp-small">Number of batches <select className="dp-select" style={{ marginLeft: 7 }} value={batches.length} onChange={(e) => setBatchCount(Number(e.target.value))}>{[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}</select></label></div>
             {batches.map((v, i) => <div key={i} className={`dp-batch ${done[i] ? "dp-done" : ""}`}><div className="dp-batch-top"><label className="dp-batch-label"><input type="checkbox" checked={!!done[i]} onChange={() => setDone((old) => ({ ...old, [i]: !old[i] }))} /><span>Batch {i + 1}</span></label><div className="dp-batch-controls"><input className="dp-input" type="number" min="0" step="0.01" aria-label={`Batch ${i + 1} weight in kilograms`} value={v} onChange={(e) => setBatches((old) => old.map((x, index) => index === i ? e.target.value : x))} /><span className="dp-small dp-muted">kg</span><button className="dp-ghost" aria-expanded={!!expanded[i]} onClick={() => setExpanded((old) => ({ ...old, [i]: !old[i] }))}>{expanded[i] ? "Hide ▴" : "Show ▾"}</button></div></div>
